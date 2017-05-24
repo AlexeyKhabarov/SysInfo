@@ -1,0 +1,337 @@
+<html>
+<%
+import time
+import sys
+import os
+%>
+System Information
+<br>
+Date <%=time.strftime("%Y-%m-%d, %H:%M:%S")%>
+<br>
+<%raw_average = os.getloadavg()%>
+Load Average:<br>&emsp; 1min:&ensp;<%=os.getloadavg()[0]%>&emsp; 5min:&ensp;<%=os.getloadavg()[1]%>&emsp; 15min:&ensp;<%=os.getloadavg()[2]%>
+<br>
+Disk Load:
+<%
+iostat = os.popen('/usr/bin/iostat -p').readlines()
+devices_stat = []
+for line in iostat[4:]:
+	if not line.strip():
+		continue
+	#end
+	columns = list(filter(None, map(lambda item: item.strip(), line.split(' '))))
+	devices_stat.append({
+		'device': 	    columns[0],
+		'tps': 		    columns[1],
+		'blk_read_per_sec': columns[2], 
+		'blk_wrtn_per_sec': columns[3], 
+		'blk_read': 	    columns[4], 
+		'blk_wrtn': 	    columns[5]
+	})
+#end
+table = ('<table border="1" cellpadding="4">'
+			'<thead>'
+				'<th>Device</th><th>tps</th><th>kB_read/s</th><th>kB_wrtn/s</th><th>kB_read</th><th>kB_wrtn</th>'
+			'</thead>')
+	
+for device in devices_stat:
+	table += '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
+			*[device[key] for key in ('device', 'tps', 'blk_read_per_sec', 'blk_wrtn_per_sec', 'blk_read', 'blk_wrtn')])
+
+#end
+table += '</table>'
+%>
+<%=table%>
+Network Load:
+<br>
+<%
+netload_info = open('/proc/net/dev').readlines()[2:]
+interfaces_stat = []
+for line in netload_info:
+	columns = list(filter(None, map(lambda item: item.strip(), line.split(' '))))
+	interfaces_stat.append({
+		'interface': columns[0][:-1],
+		'rx_bytes':  	 columns[1], 
+		'rx_packets': 	 columns[2], 
+		'rx_errors': 	 columns[3], 
+		'rx_drop':       columns[4], 
+		'rx_fifo': 	 columns[5], 
+		'rx_frame': 	 columns[6], 
+		'rx_compressed': columns[7], 
+		'rx_multicast':  columns[8], 
+		
+		'tx_bytes':	 columns[9], 
+		'tx_packets':	 columns[10], 
+		'tx_errors':	 columns[11], 
+		'tx_drop':	 columns[12], 
+		'tx_fifo':	 columns[13], 
+		'tx_colls':	 columns[14], 
+		'tx_carrier':	 columns[15], 
+		'tx_compressed': columns[16]
+	})
+#end
+table = ('<table border="1" cellpadding="4">'
+			'<thead><th>Interface</th><th colspan="8">Receive</th><th colspan="8">Transmit</th></thead>'
+			'<thead>'
+			'<th></th><th>bytes</th><th>packets</th><th>errs</th><th>drop</th><th>fifo</th><th>frame</th><th>compressed</th><th>multicast</th>'
+			'<th>bytes</th><th>packets</th><th>errs</th><th>drop</th><th>fifo</th><th>colls</th><th>carrier</th><th>compressed</th>'
+			'</thead>')
+for interface in interfaces_stat:
+	table += ('<tr>'
+			  '<td>{}</td>'
+			  '<td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td>'
+			  '<td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td>'
+			  '</tr>').format(
+				  	*[interface[key] for key in (
+						'interface',
+						'rx_bytes', 'rx_packets', 'rx_errors', 'rx_drop', 'rx_fifo', 'rx_frame', 'rx_compressed', 'rx_multicast',
+						'tx_bytes', 'tx_packets', 'tx_errors', 'tx_drop', 'tx_fifo', 'tx_colls', 'tx_carrier', 'tx_compressed'
+					)])
+#end
+table += '</table>'
+%>
+<%=table%>
+
+
+
+
+
+
+Top talkers:
+ <li>Protocols:</li>
+<%
+def _get_ip_port(line):
+	if line.count('.') > 3:
+		line = line[::-1].replace('.', ':', 1)[::-1]
+	#end
+	return line
+def _canonize_line(line):
+	line = line.strip()
+	exclude_symbols = '>,'
+	for sym in exclude_symbols:
+		line = line.replace(sym, '')
+	#end
+	while '  ' in line:
+		line = line.replace('  ', ' ')
+	#end		
+	return line
+tcpdump=os.popen('sudo timeout 59 tcpdump -ntq -i any -P inout -l').readlines()
+stat = []
+for line in tcpdump:
+	if not line.startswith('IP'):
+		continue
+	#end
+	_canonize_line(line)
+	fields = line.split(' ')
+	stat.append({
+		'source': 	_get_ip_port(fields[1]),
+		'destination': 	_get_ip_port(fields[2][:-1]),
+		'protocol':	   fields[3].upper(),
+		'bytes': 	   int(fields[-1])
+	})
+#end
+protocols = {}
+common_bytes_count = 0.
+for connection in stat:
+	protocol = connection['protocol']
+	if protocol in protocols:
+		protocols[protocol] += connection['bytes']
+		common_bytes_count += connection['bytes']
+	else:
+		protocols[protocol] = 0
+	#end
+#end
+protocols = sorted(protocols.items(), key=lambda item: -item[1])
+table = ('<table border="1" cellpadding="4">'
+			'<thead><th>Protocol</th><th>Bytes</th><th>% of total traffic</th></thead>')
+for protocol, bytes_ in protocols:
+	table += '<tr><td>{}</td><td>{}</td><td>{:.2f}</td></tr>'.format(
+			protocol, bytes_, (bytes_ / common_bytes_count) * 100)
+#end
+table += '</table>'
+%>
+<%=table%>
+
+ <li>Packets:</li>
+
+<%
+sessions_info = []
+def _get_datetime(time_string):
+	datetime_format = '%Y-%m-%d %H:%M:%S.%f'
+	return datetime.datetime.strptime(time_string, datetime_format)
+def _get_exist_connection(source, destination):
+	for connection in reversed(sessions_info):
+		if ((((connection['source'] == source) and (connection['destination'] == destination)) or
+		     ((connection['source'] == destination) and (connection['destination'] == source))) and 
+			connection['status'] == status_is_open):
+			return connection
+		#end
+	#end
+def _canonize_line(line):
+	line = line.strip()
+	exclude_symbols = '>,'
+	for sym in exclude_symbols:
+		line = line.replace(sym, '')
+	#end
+	while '  ' in line:
+		line = line.replace('  ', ' ')
+	#end
+	return line
+def _get_ip_port(line):
+	if line.count('.') > 3:
+		line = line[::-1].replace('.', ':', 1)[::-1]
+	#end
+	return line
+tcpdump_detailed = os.popen('sudo timeout 59 tcpdump -nt -i any -P inout -ttt -l').readlines()
+for line in tcpdump_detailed:
+	if 'Flags' not in line:
+		continue
+	#end
+	fields = _canonize_line(line).split(' ')
+	time = _get_datetime(' '.join(fields[:2]))
+	source = _get_ip_port(fields[3])
+	destination = _get_ip_port(fields[4][:-1])
+	length = int(fields[-1])
+	is_syn = 'S' in fields[6]
+	is_fin = 'F' in fields[6]
+	is_rst = 'R' in fields[6]
+	connection = _get_exist_connection(source, destination)
+	if is_syn and not connection:
+		sessions_info.append({
+			'status': 	   	   status_is_open,
+			'start': 	   	   time,
+			'source': 	   	   source,
+			'destination': 	   destination,
+			'packets': 	   	   1,
+			'bytes': 	   	   0,
+			'end': 			   0,
+			'packets_per_sec': 0,
+			'bytes_per_sec':   0
+		})
+	#end
+	if not (is_syn and is_fin and is_rst) and connection:
+		connection['packets'] += 1
+		connection['bytes'] += length
+	#end
+	if (is_fin or is_rst) and connection:
+		connection['packets'] += 1
+		connection_time = (time - connection['start']).microseconds
+		connection.update({
+			'status': 		   status_is_closed if is_fin else status_is_reset,
+			'end': 			   time,
+			'packets_per_sec': connection['packets'] / float(connection_time) * 1e6,
+			'bytes_per_sec':   connection['bytes'] / float(connection_time) * 1e6
+		})
+	#end
+#end
+
+table1 = ('<table border="1" cellpadding="5">'
+		'<thead><th>Start</th><th>End</th><th>From</th><th>To</th><th>Status</th><th>Packets</th><th>Packets/s</th></thead>')
+sessions = sessions_info
+time_format = '%d.%m.%Y-%H:%M:%S:%f'
+for session in sorted(sessions, key=lambda item: -item['packets_per_sec']):
+	table1 += '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.2f}</td></tr>'.format(
+		session['start'].strftime(time_format),
+		session['end'].strftime(time_format) if session['end'] else '',
+		session['source'],
+		session['destination'],
+		session['status'],
+		session['packets'],
+		session['packets_per_sec'])
+#end
+table1 += '</table>'
+table2 = ('<table border="1" cellpadding="4">'
+		'<thead><th>Start</th><th>End</th><th>From</th><th>To</th><th>Status</th><th>Bytes</th><th>Bytes/s</th></thead>')
+time_format = '%d.%m.%Y-%H:%M:%S:%f'
+for session in sorted(sessions, key=lambda item: -item['bytes_per_sec']):
+	table2 += '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.2f}</td></tr>'.format(
+		session['start'].strftime(time_format),
+		session['end'].strftime(time_format) if session['end'] else '',
+		session['source'],
+		session['destination'],
+		session['status'],
+		session['bytes'],
+		session['bytes_per_sec'])
+#end
+table2 += '</table>'
+%>
+<%=table1%>
+<li>Traffics:</li>
+<%=table2%>
+
+
+
+
+
+Network connections statistics:
+<li>Listening sockets:</li>
+<tr>
+<%
+def _get_columns(line):
+	return list(filter(None, map(lambda item: item.strip(), line.split(' '))))
+
+net_listeners = os.popen('sudo netstat -lntup').readlines()[2:]
+sockets_info = []
+for line in net_listeners:
+	columns = _get_columns(line)
+	
+	stat = {
+		'protocol': 	columns[0],
+		'recv_q': 		columns[1], 
+		'send_q': 		columns[2], 
+		'local_addr': 	columns[3], 
+		'foreign_addr': columns[4]
+	}
+	pid, program = columns[-1].split('/')
+	stat.update({
+		'state':   columns[5] if 'tcp' in stat['protocol'] else '',
+		'pid': 	   int(pid),
+		'program': program
+	})		
+	sockets_info.append(stat)
+#end
+table = ('<table border="1" cellpadding="4">'
+			'<thead>'
+				'<th>Proto</th><th>Recv-Q</th><th>Send-Q</th><th>Local Address</th><th>Foreign Address</th><th>State</th><th>Program name (PID)</th>'
+			'</thead>')
+for socket in sockets_info:
+	table += '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{} ({})</td></tr>'.format(
+			*[socket[key] for key in ('protocol', 'recv_q', 'send_q', 'local_addr', 'foreign_addr', 'state', 'program', 'pid')])
+#end
+table += '</table>'
+%>
+<%=table%>
+
+
+<li>Number of tcp connections:</li>
+<tr>
+<%
+def _get_columns(line):
+	return list(filter(None, map(lambda item: item.strip(), line.split(' '))))
+
+tcp_info = os.popen('ss -ta').readlines()[1:]
+connection_counts = {
+	state: 0 
+	for state in 
+	('ESTAB', 'SYN-SENT', 'SYN-RECV', 'FIN-WAIT-1', 'FIN-WAIT-2', 
+	 'TIME-WAIT', 'CLOSE', 'CLOSE-WAIT', 'LAST-ACK', 'LISTEN', 'CLOSING', 'UNKNOWN')
+}
+for line in tcp_info:
+	state = _get_columns(line)[0]
+	connection_counts[state] += 1
+#end
+tcp_states = sorted(connection_counts.items(), key=lambda item: -item[1])
+table = ('<table border="0" cellpadding="4">'
+			'<thead><th>State of tcp</th><th>Num of tcp</th></thead>')
+for state, count in tcp_states:
+	table += '<tr><td>{}</td><td>{}</td></tr>'.format(state, count)
+#end
+table += '</table>'
+%>
+<%=table%>
+
+
+
+
+
+

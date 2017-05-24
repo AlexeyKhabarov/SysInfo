@@ -1,0 +1,20 @@
+server {
+	listen 80;
+	
+	root /var/www;	
+
+	location / {
+	proxy_set_header X-REAL-IP $remote_addr;
+	proxy_set_header X-REAL-PORT $remote_port;
+	proxy_set_header X-NGINX-VERSION $nginx_version;
+	proxy_pass http://127.0.0.1:8000;
+	}
+
+	location =/sysinfo {
+	rewrite .* /cgi-bin/sysinfo.cgi break;
+	proxy_set_header X-REAL-IP $remote_addr;
+	proxy_set_header X-REAL-PORT $remote_port;
+	proxy_set_header X-NGINX-VERSION $nginx_version;	
+	proxy_pass http://127.0.0.1:8000;	
+}
+}
